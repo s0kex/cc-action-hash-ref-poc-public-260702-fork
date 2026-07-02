@@ -1,6 +1,6 @@
-intended branch (from BRANCH_NAME env): main#delete
-intended branch (from GITHUB_HEAD_REF):  main#delete
-run id: 28584498913
+intended branch (from BRANCH_NAME env): main#writecollab
+intended branch (from GITHUB_HEAD_REF):  main#writecollab
+run id: 28584646159
 workspace: /home/runner/work/cc-action-hash-ref-poc-public-260702/cc-action-hash-ref-poc-public-260702
 
 This file was committed by the Claude Code Action github_file_ops
