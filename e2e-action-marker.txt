@@ -1,0 +1,3 @@
+intended branch: main#external
+run id: 28581233906
+workspace: /home/runner/work/cc-action-hash-ref-poc-public-260702/cc-action-hash-ref-poc-public-260702
