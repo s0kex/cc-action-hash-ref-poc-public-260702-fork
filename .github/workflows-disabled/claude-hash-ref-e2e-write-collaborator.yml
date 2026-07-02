@@ -1,9 +1,15 @@
-name: Claude Hash Ref E2E PoC (specific-user variant)
+name: Claude Hash Ref E2E PoC (write collaborator, no allowed_non_write_users)
 
-# Variant of the primary E2E workflow that allows a single external user
-# instead of "*". Demonstrates the vulnerability is not tied to
-# allowed_non_write_users: "*". Any non-write actor named explicitly
-# is enough to reach the vulnerable file-ops path.
+# Auxiliary variant: no allowed_non_write_users at all. The PR is opened by a
+# collaborator that already has write permission. This shows that the ref
+# confusion bug is NOT caused by allowed_non_write_users. Even in a fully
+# "supported" write-capable workflow, a branch name containing "#" causes
+# the action to write to a different base ref than the PR head branch.
+#
+# The action's own FAQ documents that Claude will only push to the branch
+# it was invoked on, or its own generated branch. This variant demonstrates
+# that guarantee is broken at the GitHub API URL construction layer,
+# regardless of allowed_non_write_users.
 
 on:
   pull_request_target:
@@ -16,7 +22,6 @@ permissions:
 
 jobs:
   e2e:
-    if: ${{ contains(github.event.pull_request.head.ref, 'specific') }}
     runs-on: ubuntu-latest
 
     timeout-minutes: 10
@@ -33,8 +38,7 @@ jobs:
           prompt: "PoC: write e2e-action-marker.txt using commit signing."
           anthropic_api_key: "fake-key-not-used-by-fake-claude"
           github_token: ${{ github.token }}
-          # Explicit, single external user - not "*".
-          allowed_non_write_users: "s0kex"
+          # No allowed_non_write_users. The PR author must have write access.
           use_commit_signing: true
           path_to_claude_code_executable: ${{ github.workspace }}/.github/fake-claude.mjs
           show_full_output: "true"

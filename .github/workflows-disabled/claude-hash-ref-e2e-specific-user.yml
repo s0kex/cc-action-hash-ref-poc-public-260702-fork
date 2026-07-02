@@ -1,4 +1,9 @@
-name: Claude Hash Ref E2E PoC
+name: Claude Hash Ref E2E PoC (specific-user variant)
+
+# Variant of the primary E2E workflow that allows a single external user
+# instead of "*". Demonstrates the vulnerability is not tied to
+# allowed_non_write_users: "*". Any non-write actor named explicitly
+# is enough to reach the vulnerable file-ops path.
 
 on:
   pull_request_target:
@@ -11,7 +16,6 @@ permissions:
 
 jobs:
   e2e:
-    if: ${{ contains(github.event.pull_request.head.ref, 'v2') }}
     runs-on: ubuntu-latest
 
     timeout-minutes: 10
@@ -28,7 +32,8 @@ jobs:
           prompt: "PoC: write e2e-action-marker.txt using commit signing."
           anthropic_api_key: "fake-key-not-used-by-fake-claude"
           github_token: ${{ github.token }}
-          allowed_non_write_users: "*"
+          # Explicit, single external user - not "*".
+          allowed_non_write_users: "s0kex"
           use_commit_signing: true
           path_to_claude_code_executable: ${{ github.workspace }}/.github/fake-claude.mjs
           show_full_output: "true"

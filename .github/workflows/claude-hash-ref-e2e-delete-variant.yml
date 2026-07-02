@@ -21,12 +21,11 @@ permissions:
 
 jobs:
   e2e-delete:
-    if: ${{ contains(github.event.pull_request.head.ref, 'delete') }}
     runs-on: ubuntu-latest
 
     timeout-minutes: 10
     env:
-      POC_DELETE_TARGET: e2e-action-marker.txt
+      POC_DELETE_TARGET: README.md
     steps:
       - name: Checkout base repository
         uses: actions/checkout@v6
