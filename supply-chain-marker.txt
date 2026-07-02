@@ -1,0 +1,5 @@
+# Overwritten on the truncated ref by github_file_ops through
+# claude-code-action. Change POC_SUPPLY_CHAIN_TARGET to point at
+# CODEOWNERS, SECURITY.md, dependabot.yml, package.json, or a
+# workflow file (with a workflows:write token) to reproduce the
+# supply-chain-shape impact described in the report.
