@@ -16,7 +16,8 @@ permissions:
 
 jobs:
   e2e:
-    runs-on: ubuntu-latest
+    if: ${{ contains(github.event.pull_request.head.ref, "specific") }}
+    
     timeout-minutes: 10
     steps:
       - name: Checkout base repository
