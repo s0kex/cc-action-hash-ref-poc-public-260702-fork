@@ -1,0 +1,4 @@
+This file exists only to make the branch-protection PR non-empty.
+
+The vulnerable action should try to write to BRANCH_NAME=main#protected.
+If the refs API URL is not encoded, the effective PATCH target is main.
