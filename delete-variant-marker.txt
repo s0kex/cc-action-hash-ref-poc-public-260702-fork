@@ -1,7 +1,7 @@
 intended branch: main#delete
-run id: 28584498822
+run id: 28584601789
 workspace: /home/runner/work/cc-action-hash-ref-poc-public-260702/cc-action-hash-ref-poc-public-260702
-target for deletion: e2e-action-marker.txt
+target for deletion: README.md
 
 This marker was created via commit_files on the truncated ref, then
 will be deleted via delete_files on the same truncated ref. The
