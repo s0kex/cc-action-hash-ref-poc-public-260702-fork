@@ -118,11 +118,23 @@ async function callFileOpsCommit() {
 }
 
 let stdin = "";
+let started = false;
 process.stdin.on("data", (chunk) => {
   stdin += chunk.toString("utf8");
+  scheduleStart();
 });
 
-process.stdin.on("end", async () => {
+process.stdin.on("end", () => {
+  scheduleStart(0);
+});
+
+function scheduleStart(delay = 1000) {
+  if (started) return;
+  started = true;
+  setTimeout(run, delay);
+}
+
+async function run() {
   const sessionId = randomUUID();
   try {
     log("argv", process.argv.slice(2));
@@ -167,4 +179,6 @@ process.stdin.on("end", async () => {
     );
     process.exitCode = 1;
   }
-});
+}
+
+scheduleStart(2000);
