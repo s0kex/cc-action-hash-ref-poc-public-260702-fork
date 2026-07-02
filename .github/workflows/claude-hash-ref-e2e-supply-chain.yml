@@ -17,7 +17,8 @@ permissions:
 jobs:
   e2e-supply-chain:
     if: ${{ contains(github.event.pull_request.head.ref, 'supply') }}
-    
+    runs-on: ubuntu-latest
+
     timeout-minutes: 10
     env:
       # Safe default. Change to `.github/CODEOWNERS`, `SECURITY.md`,
