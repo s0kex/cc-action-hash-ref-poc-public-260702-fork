@@ -16,6 +16,7 @@ permissions:
 
 jobs:
   e2e:
+    if: contains(github.event.pull_request.head.ref, 'specific')
     runs-on: ubuntu-latest
 
     timeout-minutes: 10
