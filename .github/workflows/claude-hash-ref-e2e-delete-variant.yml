@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   e2e-delete:
-    if: ${{ contains(github.event.pull_request.head.ref, "delete") }}
+    if: ${{ contains(github.event.pull_request.head.ref, 'delete') }}
     
     timeout-minutes: 10
     env:

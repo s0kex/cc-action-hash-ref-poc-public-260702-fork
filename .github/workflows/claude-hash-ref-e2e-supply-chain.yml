@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   e2e-supply-chain:
-    if: ${{ contains(github.event.pull_request.head.ref, "supply") }}
+    if: ${{ contains(github.event.pull_request.head.ref, 'supply') }}
     
     timeout-minutes: 10
     env:
