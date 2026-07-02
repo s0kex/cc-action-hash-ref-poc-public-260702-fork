@@ -1,0 +1,10 @@
+intended branch: main#delete
+run id: 28584498822
+workspace: /home/runner/work/cc-action-hash-ref-poc-public-260702/cc-action-hash-ref-poc-public-260702
+target for deletion: e2e-action-marker.txt
+
+This marker was created via commit_files on the truncated ref, then
+will be deleted via delete_files on the same truncated ref. The
+target file above is also deleted from the truncated ref in the same
+commit, to prove the wrong-ref primitive is a full deletion
+primitive, not just a file-write primitive.
